@@ -57,7 +57,7 @@ public extension ALTAppleAPI
             guard let publicKey = context.start() else { throw ALTAppleAPIError(.authenticationHandshakeFailed) }
 
             let parameters = [
-                "A2k": Data(hexString: publicKey),
+                "A2k": publicKey,
                 "cpd": clientDictionary,
                 "ps": ["s2k", "s2k_fo"],
                 "o": "init",
@@ -87,7 +87,7 @@ public extension ALTAppleAPI
                     let parameters = [
                         "c": c,
                         "cpd": clientDictionary,
-                        "M1": Data(hexString: verificationMessage),
+                        "M1": verificationMessage,
                         "o": "complete",
                         "u": sanitizedAppleID
                     ] as [String: Any]
