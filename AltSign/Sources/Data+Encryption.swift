@@ -24,6 +24,18 @@ extension Data {
         return hexData
     }
 
+    /// Initialize from a hex string. FIX(gsa-protocol): SRP values must be binary <data>.
+    init(hexString: String) {
+        var data = Data()
+        var index = hexString.startIndex
+        while index < hexString.endIndex {
+            let next = hexString.index(index, offsetBy: 2, limitedBy: hexString.endIndex) ?? hexString.endIndex
+            if let byte = UInt8(hexString[index..<next], radix: 16) { data.append(byte) }
+            index = next
+        }
+        self = data
+    }
+
     func decryptedCBC(context gsaContext: GSAContext) -> Data?
     {
         #if MARKETPLACE
