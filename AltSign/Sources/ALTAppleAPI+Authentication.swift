@@ -57,7 +57,7 @@ public extension ALTAppleAPI
             guard let publicKey = context.start() else { throw ALTAppleAPIError(.authenticationHandshakeFailed) }
 
             let parameters = [
-                "A2k": publicKey,
+                "A2k": Data(hexString: publicKey),
                 "cpd": clientDictionary,
                 "ps": ["s2k", "s2k_fo"],
                 "o": "init",
@@ -87,7 +87,7 @@ public extension ALTAppleAPI
                     let parameters = [
                         "c": c,
                         "cpd": clientDictionary,
-                        "M1": verificationMessage,
+                        "M1": Data(hexString: verificationMessage),
                         "o": "complete",
                         "u": sanitizedAppleID
                     ] as [String: Any]
@@ -385,8 +385,10 @@ private extension ALTAppleAPI {
             let httpHeaders = [
                 "Content-Type": "text/x-xml-plist",
                 "X-MMe-Client-Info": anisetteData.deviceDescription,
-                "Accept": "*/*",
-                "User-Agent": "akd/1.0 CFNetwork/978.0.7 Darwin/18.7.0"
+                "Accept": "text/x-xml-plist",
+                "User-Agent": "akd/1.0 CFNetwork/808.1.4",
+                "X-Xcode-Version": "27.0 (27A5218g)",
+                "X-Apple-App-Info": "com.apple.gs.xcode.auth"
             ]
 
             let bodyData = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
