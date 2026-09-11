@@ -382,13 +382,27 @@ private extension ALTAppleAPI {
                 "Request": requestParameters
             ]
 
+            // FIX(gsa-connection-reuse): Older AltSign uses a single shared
+            // URLSession for the three GrandSlam exchanges (init/complete/
+            // apptokens). Apple's GSA edge returns HTTP 503 (HTML) when the
+            // connection is reused across those calls, and the HTML body then
+            // fails PropertyListSerialization with NSCocoaErrorDomain 3840 —
+            // the misleading "The data couldn't be read because it isn't in
+            // the correct format." error.
+            //
+            // SideStore's SideSign fixed this exact issue in commit 35993d7f
+            // ("close connection for gsa after each call coz otherwise it
+            // triggers 5XX due to connection reuse"): set "Connection: close"
+            // so each GrandSlam request opens a fresh connection instead of
+            // reusing one pinned to a failing edge node.
             let httpHeaders = [
                 "Content-Type": "text/x-xml-plist",
                 "X-MMe-Client-Info": anisetteData.deviceDescription,
                 "Accept": "text/x-xml-plist",
                 "User-Agent": "akd/1.0 CFNetwork/808.1.4",
                 "X-Xcode-Version": "27.0 (27A5218g)",
-                "X-Apple-App-Info": "com.apple.gs.xcode.auth"
+                "X-Apple-App-Info": "com.apple.gs.xcode.auth",
+                "Connection": "close"
             ]
 
             let bodyData = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)
@@ -457,7 +471,8 @@ private extension ALTAppleAPI {
             "X-MMe-Client-Info": anisetteData.deviceDescription,
             "X-Apple-I-Client-Time": dateFormatter.string(from: anisetteData.date),
             "X-Apple-Locale": anisetteData.locale.identifier,
-            "X-Apple-I-TimeZone": anisetteData.timeZone.abbreviation() ?? "PST"
+            "X-Apple-I-TimeZone": anisetteData.timeZone.abbreviation() ?? "PST",
+            "Connection": "close"
         ]
 
         var request = URLRequest(url: url)
