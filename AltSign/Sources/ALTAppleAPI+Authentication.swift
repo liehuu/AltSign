@@ -26,11 +26,31 @@ public extension ALTAppleAPIError
 
 public extension ALTAppleAPI
 {
+    // @objc methods cannot have default arguments, so the ObjC-visible entry
+    // point keeps the original signature and delegates to the Swift-only one.
     @objc func authenticate(appleID unsanitizedAppleID: String,
                             password: String,
                             anisetteData: ALTAnisetteData,
                             verificationHandler: ((@escaping (String?) -> Void) -> Void)?,
                             completionHandler: @escaping (ALTAccount?, ALTAppleAPISession?, Error?) -> Void) {
+        self.authenticate(appleID: unsanitizedAppleID, password: password,
+                          anisetteData: anisetteData, authenticationUserAgent: nil,
+                          verificationHandler: verificationHandler,
+                          completionHandler: completionHandler)
+    }
+
+    func authenticate(appleID unsanitizedAppleID: String,
+                      password: String,
+                      anisetteData: ALTAnisetteData,
+                      authenticationUserAgent: String?,
+                      verificationHandler: ((@escaping (String?) -> Void) -> Void)?,
+                      completionHandler: @escaping (ALTAccount?, ALTAppleAPISession?, Error?) -> Void) {
+        // FIX(ani-80043-match): use the User-Agent the anisette server declares.
+        // Apple requires the GSA request's UA + X-MMe-Client-Info to match the
+        // client that generated the anisette; a hardcoded pair makes Apple
+        // reject the identity with -80043/-80045 before the account is checked.
+        let resolvedUserAgent = authenticationUserAgent ?? "akd/1.0 CFNetwork/808.1.4"
+
         // Authenticating only works with lowercase email address, even if Apple ID contains capital letters.
         let sanitizedAppleID = unsanitizedAppleID.lowercased()
 
@@ -64,7 +84,7 @@ public extension ALTAppleAPI
                 "u": sanitizedAppleID
             ] as [String: Any]
 
-            sendAuthenticationRequest(parameters: parameters, anisetteData: anisetteData) { result in
+            sendAuthenticationRequest(parameters: parameters, anisetteData: anisetteData, userAgent: resolvedUserAgent) { result in
                 do {
                     let responseDictionary = try result.get()
 
@@ -92,7 +112,7 @@ public extension ALTAppleAPI
                         "u": sanitizedAppleID
                     ] as [String: Any]
 
-                    self.sendAuthenticationRequest(parameters: parameters, anisetteData: anisetteData) { result in
+                    self.sendAuthenticationRequest(parameters: parameters, anisetteData: anisetteData, userAgent: resolvedUserAgent) { result in
                         do {
                             let responseDictionary = try result.get()
 
@@ -120,7 +140,7 @@ public extension ALTAppleAPI
                                     switch result {
                                     case let .failure(error): completionHandler(nil, nil, error)
                                     case .success:
-                                        self.authenticate(appleID: unsanitizedAppleID, password: password, anisetteData: anisetteData, verificationHandler: verificationHandler, completionHandler: completionHandler)
+                                        self.authenticate(appleID: unsanitizedAppleID, password: password, anisetteData: anisetteData, authenticationUserAgent: authenticationUserAgent, verificationHandler: verificationHandler, completionHandler: completionHandler)
                                     }
                                 }
 
@@ -131,7 +151,7 @@ public extension ALTAppleAPI
                                     switch result {
                                     case let .failure(error): completionHandler(nil, nil, error)
                                     case .success:
-                                        self.authenticate(appleID: unsanitizedAppleID, password: password, anisetteData: anisetteData, verificationHandler: verificationHandler, completionHandler: completionHandler)
+                                        self.authenticate(appleID: unsanitizedAppleID, password: password, anisetteData: anisetteData, authenticationUserAgent: authenticationUserAgent, verificationHandler: verificationHandler, completionHandler: completionHandler)
                                     }
                                 }
 
@@ -373,7 +393,7 @@ private extension ALTAppleAPI {
 }
 
 private extension ALTAppleAPI {
-    func sendAuthenticationRequest(parameters requestParameters: [String: Any], anisetteData: ALTAnisetteData, completionHandler: @escaping (Result<[String: Any], Error>) -> Void) {
+    func sendAuthenticationRequest(parameters requestParameters: [String: Any], anisetteData: ALTAnisetteData, userAgent: String = "akd/1.0 CFNetwork/808.1.4", completionHandler: @escaping (Result<[String: Any], Error>) -> Void) {
         do {
             let requestURL = URL(string: "https://gsa.apple.com/grandslam/GsService2")!
 
@@ -411,7 +431,7 @@ private extension ALTAppleAPI {
                 // ec=-1 for both the iPhone OS; and Mac OS X; families. It is
                 // restored for parity with the known-good build, not because it
                 // is itself a gate.
-                "User-Agent": "akd/1.0 CFNetwork/808.1.4",
+                "User-Agent": userAgent,
                 "X-Xcode-Version": "27.0 (27A5218g)",
                 "X-Apple-App-Info": "com.apple.gs.xcode.auth",
                 "Connection": "close"
@@ -464,7 +484,18 @@ private extension ALTAppleAPI {
                     switch errorCode
                     {
                     case -20101, -22406: throw ALTAppleAPIError(.incorrectCredentials)
-                    case -22421: throw ALTAppleAPIError(.invalidAnisetteData)
+                    // FIX(ani-80043): -80043 / -80044 / -80045 are anisette
+                    // rejections — Apple refused the machine identity this
+                    // anisette was minted from, not the account. Verified
+                    // 2026-11-25: anisette servers that are perfectly reachable
+                    // can still carry a device id Apple no longer accepts
+                    // (ani.sidestore.zip and ani.npeg.us both serve
+                    // 8ABE1294-…, which returns -80043 for every account).
+                    //
+                    // Mapping them to .invalidAnisetteData instead of the
+                    // generic "Apple returned N" lets the caller switch
+                    // anisette servers and retry, which is the only remedy.
+                    case -22421, -80043, -80044, -80045: throw ALTAppleAPIError(.invalidAnisetteData)
                     case -22410:
                         // FIX(gsa-22410): Apple tightened the identity check on
                         // 2026-11-18. -22410 is returned *after* the anisette
