@@ -399,13 +399,19 @@ private extension ALTAppleAPI {
                 "Content-Type": "text/x-xml-plist",
                 "X-MMe-Client-Info": anisetteData.deviceDescription,
                 "Accept": "text/x-xml-plist",
-                // FIX(gsa-ua-2026-11): match the User-Agent to the client-info
-                // family. Apple's edge 503s the `macOS;` client-info family and
-                // the anisette path now pins a `Mac OS X;26.6` identity; iloader
-                // pairs that family with this exact UA (nab138/iloader 7364ae6).
-                // CFNetwork/808.1.4 is a 2016-era build, which reads as
-                // inconsistent next to a 26.6 OS claim.
-                "User-Agent": "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0",
+                // FIX(gsa-ua-2026-11): restore the User-Agent that shipped with
+                // the last build that could actually sign in (9f2253db, AltSign
+                // 174ce5d). The client-info pin is being restored to that same
+                // build's value, so the UA is restored with it: changing two
+                // halves of the identity at once is what made the -22410
+                // regression ambiguous in the first place.
+                //
+                // Verified 2026-11-25: the UA is not checked at the GSA edge —
+                // 808.1.4, 811.5.4 and 811.5.4+Darwin all return HTTP 200 with
+                // ec=-1 for both the iPhone OS; and Mac OS X; families. It is
+                // restored for parity with the known-good build, not because it
+                // is itself a gate.
+                "User-Agent": "akd/1.0 CFNetwork/808.1.4",
                 "X-Xcode-Version": "27.0 (27A5218g)",
                 "X-Apple-App-Info": "com.apple.gs.xcode.auth",
                 "Connection": "close"
@@ -460,20 +466,36 @@ private extension ALTAppleAPI {
                     case -20101, -22406: throw ALTAppleAPIError(.incorrectCredentials)
                     case -22421: throw ALTAppleAPIError(.invalidAnisetteData)
                     case -22410:
-                        // FIX(gsa-22410): Apple tightened the anisette identity
-                        // check on 2026-11-18. -22410 is returned *after* the
-                        // anisette and the account have both been accepted, so
-                        // it never means "wrong password" — it means the device
-                        // identity presented with this request does not match
-                        // the one the cached anisette (adi.pb) was provisioned
-                        // against. Reporting Apple's generic "This action could
-                        // not be completed. Please try again." sends users into
-                        // a retry loop that can never succeed, so spell out the
-                        // actual remedy instead.
-                        let message = "Apple rejected the provisioned Anisette identity (-22410). " +
-                                      "This happens after the X-MMe-Client-Info header changes: the cached adi.pb " +
-                                      "was provisioned under the previous identity. Go to Settings → " +
-                                      "User Customizations → Reset adi.pb, then sign in again."
+                        // FIX(gsa-22410): Apple tightened the identity check on
+                        // 2026-11-18. -22410 is returned *after* the anisette
+                        // and the account have both been accepted, so it never
+                        // means "wrong password" — it is a late rejection of
+                        // the device identity presented with this request.
+                        //
+                        // The `Mac OS X;` client-info family is the known
+                        // trigger: it clears the GSA edge (no more 503/3840)
+                        // but is then rejected here. SideStore#1745 records the
+                        // same behaviour for the old `Mac OS X;10.12.6`
+                        // identity. The fix is to pin the `iPhone OS;` family
+                        // (see FetchAnisetteDataOperation.pinnedClientInfo),
+                        // not to reset the cached adi.pb.
+                        //
+                        // -23782 is grouped in: it is the same late identity
+                        // rejection reported under a second code for the same
+                        // family.
+                        let message = "Apple rejected the device identity (-22410). " +
+                                      "This is a late check that runs after the anisette and the " +
+                                      "account are accepted, so the password is not the problem. " +
+                                      "Update to a build that pins the iPhone OS; client-info family, " +
+                                      "then sign in again."
+                        throw NSError(domain: ALTUnderlyingAppleAPIErrorDomain,
+                                      code: errorCode,
+                                      userInfo: [NSLocalizedDescriptionKey: message])
+                    case -23782:
+                        let message = "Apple rejected the device identity (-23782). " +
+                                      "This is the same late identity check as -22410 and is " +
+                                      "caused by the Mac OS X; client-info family. Update to a " +
+                                      "build that pins the iPhone OS; family, then sign in again."
                         throw NSError(domain: ALTUnderlyingAppleAPIErrorDomain,
                                       code: errorCode,
                                       userInfo: [NSLocalizedDescriptionKey: message])
