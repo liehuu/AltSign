@@ -399,7 +399,13 @@ private extension ALTAppleAPI {
                 "Content-Type": "text/x-xml-plist",
                 "X-MMe-Client-Info": anisetteData.deviceDescription,
                 "Accept": "text/x-xml-plist",
-                "User-Agent": "akd/1.0 CFNetwork/808.1.4",
+                // FIX(gsa-ua-2026-11): match the User-Agent to the client-info
+                // family. Apple's edge 503s the `macOS;` client-info family and
+                // the anisette path now pins a `Mac OS X;26.6` identity; iloader
+                // pairs that family with this exact UA (nab138/iloader 7364ae6).
+                // CFNetwork/808.1.4 is a 2016-era build, which reads as
+                // inconsistent next to a 26.6 OS claim.
+                "User-Agent": "akd/1.0 CFNetwork/811.5.4 Darwin/16.7.0",
                 "X-Xcode-Version": "27.0 (27A5218g)",
                 "X-Apple-App-Info": "com.apple.gs.xcode.auth",
                 "Connection": "close"
@@ -453,6 +459,24 @@ private extension ALTAppleAPI {
                     {
                     case -20101, -22406: throw ALTAppleAPIError(.incorrectCredentials)
                     case -22421: throw ALTAppleAPIError(.invalidAnisetteData)
+                    case -22410:
+                        // FIX(gsa-22410): Apple tightened the anisette identity
+                        // check on 2026-11-18. -22410 is returned *after* the
+                        // anisette and the account have both been accepted, so
+                        // it never means "wrong password" — it means the device
+                        // identity presented with this request does not match
+                        // the one the cached anisette (adi.pb) was provisioned
+                        // against. Reporting Apple's generic "This action could
+                        // not be completed. Please try again." sends users into
+                        // a retry loop that can never succeed, so spell out the
+                        // actual remedy instead.
+                        let message = "Apple rejected the provisioned Anisette identity (-22410). " +
+                                      "This happens after the X-MMe-Client-Info header changes: the cached adi.pb " +
+                                      "was provisioned under the previous identity. Go to Settings → " +
+                                      "User Customizations → Reset adi.pb, then sign in again."
+                        throw NSError(domain: ALTUnderlyingAppleAPIErrorDomain,
+                                      code: errorCode,
+                                      userInfo: [NSLocalizedDescriptionKey: message])
                     default:
                         guard let errorDescription = status["em"] as? String else { throw ALTAppleAPIError.unknown() }
                         
