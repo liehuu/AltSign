@@ -416,7 +416,31 @@ private extension ALTAppleAPI {
                 do
                 {
                     guard let data = data else { throw error ?? ALTAppleAPIError.unknown() }
-                    
+
+                    // FIX(gsa-3840-diagnostics): Apple's GSA edge answers blocked
+                    // client-info values with an HTML 503 page. Feeding that HTML
+                    // straight into PropertyListSerialization throws
+                    // NSCocoaErrorDomain 3840 ("The data couldn't be read because
+                    // it isn't in the correct format."), which hides both the real
+                    // HTTP status and the fact that the request never reached the
+                    // sign-in service at all. Surface the status explicitly so the
+                    // failure is diagnosable from the UI / logs.
+                    if let httpResponse = response as? HTTPURLResponse,
+                       !(200...299).contains(httpResponse.statusCode) {
+                        let preview = String(data: data.prefix(160), encoding: .utf8) ?? "<non-utf8 body>"
+                        let message = "GrandSlam returned HTTP \(httpResponse.statusCode). " +
+                                      "This usually means Apple rejected the X-MMe-Client-Info header. Body: \(preview)"
+                        throw NSError(domain: ALTUnderlyingAppleAPIErrorDomain,
+                                      code: httpResponse.statusCode,
+                                      userInfo: [NSLocalizedDescriptionKey: message])
+                    }
+
+                    if data.isEmpty {
+                        throw NSError(domain: ALTUnderlyingAppleAPIErrorDomain,
+                                      code: 0,
+                                      userInfo: [NSLocalizedDescriptionKey: "GrandSlam returned HTTP 200 with an empty body. This usually means the request body layout (Header/Request wrapper) was rejected."])
+                    }
+
                     guard let responseDictionary = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
                           let dictionary = responseDictionary["Response"] as? [String: Any],
                           let status = dictionary["Status"] as? [String: Any]
